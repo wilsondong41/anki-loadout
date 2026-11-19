@@ -193,19 +193,47 @@ class AnkiDevice:
     # Collection config
     ##########################################################################
 
-    def _entry_names(self, folder: str) -> list[str]:
-        """Loadout's entry files in the media folder. Listing a media folder
-        of 100,000+ card files takes a noticeable moment, so the names are
-        kept until the folder changes (a file added, removed or renamed
-        changes its modification time) or for five minutes at most."""
+    def _loadout_names(self, folder: str) -> list[str]:
+        """Loadout's files in the media folder. Listing a media folder of
+        100,000+ card files takes a noticeable moment, so the names are kept
+        until an outside change touches the folder or for five minutes at most."""
         stamp = os.stat(folder).st_mtime_ns
         cached = self._names
         if cached and cached[0] == (folder, stamp) and time.time() - cached[1] < 300:
             return cached[2]
-        names = [n for n in os.listdir(folder)
-                 if n.startswith(blobs.ENTRY_PREFIX) and n.endswith(".json")]
+        names = [n for n in os.listdir(folder) if n.startswith(blobs.PREFIX)]
         self._names = ((folder, stamp), time.time(), names)
         return names
+
+    def _note_media_change(self, folder: str, added: str | None = None, removed: set[str] | None = None) -> None:
+        """Keep the cached media listing valid when Loadout itself adds or
+        removes one of its own files in collection.media."""
+        cached = self._names
+        if not cached or cached[0][0] != folder:
+            return
+        try:
+            stamp = os.stat(folder).st_mtime_ns
+        except OSError:
+            self._names = None
+            return
+        names = list(cached[2])
+        if removed:
+            names = [n for n in names if n not in removed]
+        if added and added.startswith(blobs.PREFIX) and added not in names:
+            names.append(added)
+        self._names = ((folder, stamp), cached[1], names)
+
+    def forget_media_listing(self) -> None:
+        """Drop the cached listing. Called around syncs, so files a sync
+        brought are seen even where a folder's modification time is coarse
+        or not updated (network drives, FAT/exFAT)."""
+        self._names = None
+
+    def _entry_names(self, folder: str) -> list[str]:
+        return [
+            n for n in self._loadout_names(folder)
+            if n.startswith(blobs.ENTRY_PREFIX) and n.endswith(".json")
+        ]
 
     def read_remote(self) -> dict[str, dict[str, Any]]:
         folder = mw.col.media.dir()
@@ -237,15 +265,23 @@ class AnkiDevice:
         # Replace the file (rather than rewrite it in place) so the media
         # folder's modification time changes and Anki's next media sync
         # notices and uploads it.
-        target = self._media(blobs.entry_file_name(key))
+        fname = blobs.entry_file_name(key)
+        media_dir = mw.col.media.dir()
+        target = os.path.join(media_dir, fname)
         data = blobs.encode_entry(key, entry)
-        for tmp_dir in (os.path.dirname(self._log_path), mw.col.media.dir()):
+        for tmp_dir in (os.path.dirname(self._log_path), media_dir):
             tmp = os.path.join(tmp_dir, f".loadout-{uuid.uuid4().hex}.tmp")
             try:
                 os.makedirs(tmp_dir, exist_ok=True)
                 with open(tmp, "wb") as f:
                     f.write(data)
                 os.replace(tmp, target)
+                try:
+                    st = os.stat(target)
+                    self._contents[target] = ((st.st_mtime_ns, st.st_size), data)
+                except OSError:
+                    pass
+                self._note_media_change(media_dir, added=fname)
                 return
             except OSError:  # e.g. add-ons and media on different drives
                 if os.path.exists(tmp):
@@ -286,20 +322,30 @@ class AnkiDevice:
             return f.read()
 
     def media_write(self, name: str, data: bytes) -> None:
+        folder = mw.col.media.dir()
         stored = mw.col.media.write_data(name, data)
         if stored != name:
             raise ValueError(f"Anki stored {name} as {stored}")
+        self._note_media_change(folder, added=name)
 
     def media_list(self, prefix: str) -> list[tuple[str, float]]:
         folder = mw.col.media.dir()
+        candidates = self._loadout_names(folder) if prefix.startswith(blobs.PREFIX) else os.listdir(folder)
         out = []
-        for name in os.listdir(folder):
+        for name in candidates:
             if name.startswith(prefix):
-                out.append((name, os.path.getmtime(os.path.join(folder, name))))
+                try:
+                    out.append((name, os.path.getmtime(os.path.join(folder, name))))
+                except OSError:
+                    continue
         return out
 
     def media_trash(self, names: list[str]) -> None:
+        folder = mw.col.media.dir()
         mw.col.media.trash_files(names)
+        for n in names:
+            self._contents.pop(os.path.join(folder, n), None)
+        self._note_media_change(folder, removed=set(names))
 
     # Preferences
     ##########################################################################

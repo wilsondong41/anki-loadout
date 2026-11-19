@@ -1,7 +1,7 @@
 """Loadout's version. Computers compare it to notice when they run different
 builds (an older build can disagree about how entries are written)."""
 
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 
 def parse(version: str) -> tuple[int, ...]:

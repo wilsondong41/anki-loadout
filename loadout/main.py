@@ -157,6 +157,8 @@ def _use_this_profile() -> None:
 def _pull(reason: str) -> None:
     if not _engine:
         return
+    if reason != "open":
+        _device.forget_media_listing()  # a sync may have brought files
     _safely(lambda: _engine.pull(reason), "pull")
     if _engine.state["joined"] and not _active_profile():
         _claim_profile()
@@ -235,7 +237,9 @@ def on_profile_open() -> None:
     _safely(_follow_renamed_profile, "following a renamed profile")
     _engine = _make_engine()
     _engine.check_ankiweb_during_push = False
-    mw.taskman.run_in_background(_device.warm_up, lambda fut: None)
+    mw.progress.single_shot(
+        4000, lambda: mw.taskman.run_in_background(_device.warm_up, lambda fut: None)
+    )
     _apply_profile_rule()
     if _engine.other_copy:
         _rebuild_menu()
@@ -264,6 +268,7 @@ def on_profile_close() -> None:
 
 def on_sync_start() -> None:
     if _engine:
+        _device.forget_media_listing()
         _safely(_engine.push, "push")
 
 
@@ -284,6 +289,7 @@ def on_media_sync(running: bool) -> None:
     # collection, so this is when changes from other computers arrive.
     if running or not _engine or not mw.col:
         return
+    _device.forget_media_listing()
     if _engine.closing:
         # The closing media sync: write data it brought for add-ons that are
         # about to stop; everything else applies on the next start.
