@@ -1,0 +1,13 @@
+{
+    "mode": "mirror",
+    "confirm_new_code": true,
+    "mirror_preferences": true,
+    "exclude_addons": [],
+    "exclude_files": [],
+    "exclude_config_keys": {},
+    "self_sync": {},
+    "backup_ankiweb_addons": "when_needed",
+    "max_file_mb": 20,
+    "max_addon_mb": 50,
+    "max_code_mb": 90
+}

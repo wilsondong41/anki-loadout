@@ -1,0 +1,12 @@
+backups/
+dist/
+user_files/
+loadout/user_files/
+.claude/
+AGENTS.md
+HANDOFF-windows.md
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+meta.json
